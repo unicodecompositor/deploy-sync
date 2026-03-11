@@ -550,13 +550,38 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
       newSpec.gridWidth = finalW;
       newSpec.gridHeight = finalH;
 
-      // Record d= (bounds) in history for undo — track new dimensions
+      // Record d= (bounds) in history for undo — track new dimensions + se= (scale expand) + flip
+      const totalExpandLeft = Math.max(0, finalW - initialSpec.gridWidth);
+      const totalExpandTop = Math.max(0, finalH - initialSpec.gridHeight);
       selectionSet.forEach(idx => {
         const sym = newSpec.symbols[idx];
         const origSym = initialSpec.symbols[idx];
         if (!sym || !origSym) return;
         const newRect = getRect(sym.start, sym.end, finalW);
-        appendTempHistoryStep(sym, origSym, 'd', { x: newRect.width, y: newRect.height });
+        
+        // Clone original history and append
+        const origHistory = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : [];
+        sym.history = origHistory;
+        
+        const nextIndex = sym.history.length > 0 ? Math.max(...sym.history.map((s: any) => s.index)) + 1 : 0;
+        const step: any = { index: nextIndex };
+        
+        if (nextIndex === 0) {
+          step.d = { op: '=', x: newRect.width, y: newRect.height };
+        } else {
+          const resolved = resolveHistory(sym.history);
+          const prevD = resolved.d || { x: 0, y: 0 };
+          step.d = { op: '+=', x: newRect.width - prevD.x, y: newRect.height - prevD.y };
+        }
+        
+        // Attach se= (scale expand) if grid was expanded
+        if (totalExpandLeft > 0 || totalExpandTop > 0) {
+          step.se = { sl: totalExpandLeft, st: totalExpandTop };
+        }
+        
+        sym.history.push(step);
+        sym.bounds = { w: newRect.width, h: newRect.height };
+        reResolveAllFromHistory(sym);
       });
 
     } else if (isEditing === 'rotate') {
