@@ -697,7 +697,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
     // Grid-level background
     if (spec?.background) {
       ctx.save();
-      ctx.globalAlpha = spec.backgroundOpacity ?? spec.opacity ?? 1;
+      ctx.globalAlpha = spec.backgroundOpacity ?? 1;
       ctx.fillStyle = spec.background;
       if (spec.borderRadius) {
         const brStr = spec.borderRadius;
