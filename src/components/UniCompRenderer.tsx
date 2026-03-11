@@ -913,7 +913,37 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         }
       });
 
-      // Grid-level border (drawn inset by half border width)
+      // Draw layer borders (bb=) AFTER all symbols — on top of symbol content, below grid border
+      spec.symbols.forEach((symbol, idx) => {
+        if (hiddenSet.includes(idx)) return;
+        if (!symbol.layerBorderWidth || symbol.layerBorderWidth <= 0 || !symbol.layerBorderColor) return;
+        
+        const rect = getRect(symbol.start, symbol.end, gridWidth);
+        const x1 = rect.x1 * cellSize;
+        const y1 = rect.y1 * cellSize;
+        const sw = (rect.x2 - rect.x1 + 1) * cellSize;
+        const sh = (rect.y2 - rect.y1 + 1) * cellSize;
+        
+        ctx.save();
+        const lbPx = Math.max(1, symbol.layerBorderWidth * cellSize);
+        ctx.globalAlpha = symbol.layerBorderOpacity ?? 1;
+        ctx.strokeStyle = symbol.layerBorderColor;
+        ctx.lineWidth = lbPx;
+        const halfLb = lbPx / 2;
+        
+        if (symbol.borderRadius) {
+          const brStr = symbol.borderRadius;
+          const shortSide = Math.min(sw, sh);
+          let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr);
+          radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
+          ctx.beginPath();
+          ctx.roundRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx, Math.max(0, radiusPx - halfLb));
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx);
+        }
+        ctx.restore();
+      });
       if (spec.strokeWidth && spec.strokeWidth > 0 && spec.strokeColor) {
         ctx.save();
         const borderPx = Math.max(1, spec.strokeWidth * cellSize);
