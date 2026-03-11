@@ -145,25 +145,30 @@ export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
 
-  const handleGridColorChange = useCallback((color: string, opacity: number, isFinal: boolean) => {
+  const handleGridSymbolChange = useCallback((data: {
+    color: string; opacity: number; strokeWidth: number; strokeColor: string; strokeOpacity: number;
+  }, isFinal: boolean) => {
+    // Grid palette Symbol tab: not used for grid, but required by interface
     if (!spec) return;
     if (isFinal) setGridColorHistory(h => [...h, JSON.parse(JSON.stringify(spec))]);
-    const newSpec = { ...spec };
-    // Grid background is not set here — only foreground color doesn't apply to grid
-    onUpdateCode(stringifySpec(newSpec), isFinal);
+    onUpdateCode(stringifySpec(spec), isFinal);
   }, [spec, onUpdateCode]);
 
-  const handleGridBgChange = useCallback((bg: string, bgOpacity: number, borderRadius: string, isFinal: boolean) => {
+  const handleGridLayerChange = useCallback((data: {
+    background: string; backgroundOpacity: number; borderRadius: string;
+    layerBorderWidth: number; layerBorderColor: string; layerBorderOpacity: number;
+  }, isFinal: boolean) => {
     if (!spec) return;
     if (isFinal) setGridColorHistory(h => [...h, JSON.parse(JSON.stringify(spec))]);
-    const newSpec = { ...spec, background: bg, backgroundOpacity: bgOpacity, borderRadius: borderRadius || undefined };
-    onUpdateCode(stringifySpec(newSpec), isFinal);
-  }, [spec, onUpdateCode]);
-
-  const handleGridStrokeChange = useCallback((width: number, color: string, strokeOpacity: number, isFinal: boolean) => {
-    if (!spec) return;
-    if (isFinal) setGridColorHistory(h => [...h, JSON.parse(JSON.stringify(spec))]);
-    const newSpec = { ...spec, strokeWidth: width > 0 ? width : undefined, strokeColor: width > 0 ? color : undefined, strokeOpacity: strokeOpacity < 1 ? strokeOpacity : undefined };
+    const newSpec = {
+      ...spec,
+      background: data.background,
+      backgroundOpacity: data.backgroundOpacity,
+      borderRadius: data.borderRadius || undefined,
+      strokeWidth: data.layerBorderWidth > 0 ? data.layerBorderWidth : undefined,
+      strokeColor: data.layerBorderWidth > 0 ? data.layerBorderColor : undefined,
+      strokeOpacity: data.layerBorderOpacity < 1 ? data.layerBorderOpacity : undefined,
+    };
     onUpdateCode(stringifySpec(newSpec), isFinal);
   }, [spec, onUpdateCode]);
 
@@ -450,9 +455,8 @@ export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
             strokeWidth={spec?.strokeWidth ?? 0}
             strokeColor={spec?.strokeColor || 'hsl(0, 0%, 100%)'}
             strokeOpacity={spec?.strokeOpacity ?? 1}
-            onColorChange={handleGridColorChange}
-            onBackgroundChange={handleGridBgChange}
-            onStrokeChange={handleGridStrokeChange}
+            onSymbolChange={handleGridSymbolChange}
+            onLayerChange={handleGridLayerChange}
             style={{ width: '100%' }}
           />
           {gridColorHistory.length > 0 && (
