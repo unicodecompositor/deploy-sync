@@ -273,7 +273,25 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         }
       });
     } else if (paramType === 'd') {
-      // For scale undo: get current bounds, undo, restore dimensions
+      // For scale undo: restore dimensions + contract grid via se= (scale expand)
+      let expandLeft = 0, expandTop = 0;
+      
+      // Find se= from the step being undone
+      selectionSet.forEach(idx => {
+        const sym = newSpec.symbols[idx];
+        if (!sym?.history) return;
+        for (let i = sym.history.length - 1; i >= 0; i--) {
+          if (sym.history[i].d) {
+            const se = sym.history[i].se;
+            if (se) {
+              expandLeft = Math.max(expandLeft, se.sl || 0);
+              expandTop = Math.max(expandTop, se.st || 0);
+            }
+            break;
+          }
+        }
+      });
+      
       selectionSet.forEach(idx => {
         const sym = newSpec.symbols[idx];
         if (!sym) return;
@@ -286,6 +304,28 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           sym.end = newEnd;
         }
       });
+      
+      // Contract grid if it was expanded during scaling
+      if (changed && (expandLeft > 0 || expandTop > 0)) {
+        const oldW = newSpec.gridWidth;
+        const newW = Math.max(2, oldW - expandLeft);
+        const newH = Math.max(2, newSpec.gridHeight - expandTop);
+        
+        newSpec.symbols = newSpec.symbols.map(s => {
+          const r = getRect(s.start, s.end, oldW);
+          const shiftedX = Math.max(0, r.x1 - expandLeft);
+          const shiftedY = Math.max(0, r.y1 - expandTop);
+          const w = Math.min(r.width, newW - shiftedX);
+          const h = Math.min(r.height, newH - shiftedY);
+          return {
+            ...s,
+            start: shiftedY * newW + shiftedX,
+            end: (shiftedY + Math.max(1, h) - 1) * newW + (shiftedX + Math.max(1, w) - 1)
+          };
+        });
+        newSpec.gridWidth = newW;
+        newSpec.gridHeight = newH;
+      }
     } else {
       // History-based undo for st/sp/rotate/scale
       selectionSet.forEach(idx => {
@@ -550,13 +590,38 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
       newSpec.gridWidth = finalW;
       newSpec.gridHeight = finalH;
 
-      // Record d= (bounds) in history for undo — track new dimensions
+      // Record d= (bounds) in history for undo — track new dimensions + se= (scale expand) + flip
+      const totalExpandLeft = Math.max(0, finalW - initialSpec.gridWidth);
+      const totalExpandTop = Math.max(0, finalH - initialSpec.gridHeight);
       selectionSet.forEach(idx => {
         const sym = newSpec.symbols[idx];
         const origSym = initialSpec.symbols[idx];
         if (!sym || !origSym) return;
         const newRect = getRect(sym.start, sym.end, finalW);
-        appendTempHistoryStep(sym, origSym, 'd', { x: newRect.width, y: newRect.height });
+        
+        // Clone original history and append
+        const origHistory = origSym?.history ? JSON.parse(JSON.stringify(origSym.history)) : [];
+        sym.history = origHistory;
+        
+        const nextIndex = sym.history.length > 0 ? Math.max(...sym.history.map((s: any) => s.index)) + 1 : 0;
+        const step: any = { index: nextIndex };
+        
+        if (nextIndex === 0) {
+          step.d = { op: '=', x: newRect.width, y: newRect.height };
+        } else {
+          const resolved = resolveHistory(sym.history);
+          const prevD = resolved.d || { x: 0, y: 0 };
+          step.d = { op: '+=', x: newRect.width - prevD.x, y: newRect.height - prevD.y };
+        }
+        
+        // Attach se= (scale expand) if grid was expanded
+        if (totalExpandLeft > 0 || totalExpandTop > 0) {
+          step.se = { sl: totalExpandLeft, st: totalExpandTop };
+        }
+        
+        sym.history.push(step);
+        sym.bounds = { w: newRect.width, h: newRect.height };
+        reResolveAllFromHistory(sym);
       });
 
     } else if (isEditing === 'rotate') {
@@ -697,7 +762,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
     // Grid-level background
     if (spec?.background) {
       ctx.save();
-      ctx.globalAlpha = spec.backgroundOpacity ?? spec.opacity ?? 1;
+      ctx.globalAlpha = spec.backgroundOpacity ?? 1;
       ctx.fillStyle = spec.background;
       if (spec.borderRadius) {
         const brStr = spec.borderRadius;
@@ -756,28 +821,17 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         const sw = (rect.x2 - rect.x1 + 1) * cellSize;
         const sh = (rect.y2 - rect.y1 + 1) * cellSize;
 
-        // Draw layer background fill (bc=) behind the glyph area
+        // Draw layer background fill (bc=) behind the glyph area — opacity isolated
         if (symbol.background) {
           ctx.save();
-          const bgOpacity = symbol.backgroundOpacity ?? 1;
-          ctx.globalAlpha = bgOpacity;
+          ctx.globalAlpha = symbol.backgroundOpacity ?? 1;
           ctx.fillStyle = symbol.background;
           
           if (symbol.borderRadius) {
             const brStr = symbol.borderRadius;
-            let radiusPx: number;
             const shortSide = Math.min(sw, sh);
-            
-            if (brStr.endsWith('%')) {
-              const pct = parseFloat(brStr) / 100;
-              radiusPx = shortSide * pct;
-            } else {
-              radiusPx = parseFloat(brStr);
-            }
-            
-            radiusPx = Math.min(radiusPx, shortSide / 2);
-            radiusPx = Math.max(0, radiusPx);
-            
+            let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr);
+            radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
             ctx.beginPath();
             ctx.roundRect(x1, y1, sw, sh, radiusPx);
             ctx.fill();
@@ -787,28 +841,7 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           ctx.restore();
         }
 
-        // Draw layer border (bb=) — separate from symbol border (b=)
-        if (symbol.layerBorderWidth && symbol.layerBorderWidth > 0 && symbol.layerBorderColor) {
-          ctx.save();
-          const lbPx = Math.max(1, symbol.layerBorderWidth * cellSize);
-          ctx.globalAlpha = symbol.layerBorderOpacity ?? 1;
-          ctx.strokeStyle = symbol.layerBorderColor;
-          ctx.lineWidth = lbPx;
-          const halfLb = lbPx / 2;
-          
-          if (symbol.borderRadius) {
-            const brStr = symbol.borderRadius;
-            const shortSide = Math.min(sw, sh);
-            let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr);
-            radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
-            ctx.beginPath();
-            ctx.roundRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx, Math.max(0, radiusPx - halfLb));
-            ctx.stroke();
-          } else {
-            ctx.strokeRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx);
-          }
-          ctx.restore();
-        }
+        // NOTE: Layer border (bb=) is drawn AFTER the symbol content (below)
 
         const hasSt = symbol.st && Math.abs(symbol.st.force) > 0;
         const hasSp = symbol.sp && Math.abs(symbol.sp.force) > 0;
@@ -945,7 +978,37 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         }
       });
 
-      // Grid-level border (drawn inset by half border width)
+      // Draw layer borders (bb=) AFTER all symbols — on top of symbol content, below grid border
+      spec.symbols.forEach((symbol, idx) => {
+        if (hiddenSet.includes(idx)) return;
+        if (!symbol.layerBorderWidth || symbol.layerBorderWidth <= 0 || !symbol.layerBorderColor) return;
+        
+        const rect = getRect(symbol.start, symbol.end, gridWidth);
+        const x1 = rect.x1 * cellSize;
+        const y1 = rect.y1 * cellSize;
+        const sw = (rect.x2 - rect.x1 + 1) * cellSize;
+        const sh = (rect.y2 - rect.y1 + 1) * cellSize;
+        
+        ctx.save();
+        const lbPx = Math.max(1, symbol.layerBorderWidth * cellSize);
+        ctx.globalAlpha = symbol.layerBorderOpacity ?? 1;
+        ctx.strokeStyle = symbol.layerBorderColor;
+        ctx.lineWidth = lbPx;
+        const halfLb = lbPx / 2;
+        
+        if (symbol.borderRadius) {
+          const brStr = symbol.borderRadius;
+          const shortSide = Math.min(sw, sh);
+          let radiusPx = brStr.endsWith('%') ? shortSide * parseFloat(brStr) / 100 : parseFloat(brStr);
+          radiusPx = Math.min(Math.max(0, radiusPx), shortSide / 2);
+          ctx.beginPath();
+          ctx.roundRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx, Math.max(0, radiusPx - halfLb));
+          ctx.stroke();
+        } else {
+          ctx.strokeRect(x1 + halfLb, y1 + halfLb, sw - lbPx, sh - lbPx);
+        }
+        ctx.restore();
+      });
       if (spec.strokeWidth && spec.strokeWidth > 0 && spec.strokeColor) {
         ctx.save();
         const borderPx = Math.max(1, spec.strokeWidth * cellSize);

@@ -145,15 +145,21 @@ export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
   const previewCanvasRef = useRef<HTMLCanvasElement>(null);
   const exportButtonRef = useRef<HTMLButtonElement>(null);
 
+  // Grid palette: Symbol tab updates grid content color (not per-layer)
   const handleGridSymbolChange = useCallback((data: {
     color: string; opacity: number; strokeWidth: number; strokeColor: string; strokeOpacity: number;
   }, isFinal: boolean) => {
-    // Grid palette Symbol tab: not used for grid, but required by interface
     if (!spec) return;
     if (isFinal) setGridColorHistory(h => [...h, JSON.parse(JSON.stringify(spec))]);
-    onUpdateCode(stringifySpec(spec), isFinal);
+    // Grid-level opacity
+    const newSpec = {
+      ...spec,
+      opacity: data.opacity < 1 ? data.opacity : undefined,
+    };
+    onUpdateCode(stringifySpec(newSpec), isFinal);
   }, [spec, onUpdateCode]);
 
+  // Grid palette: Layer tab → gc= (background) and gb= (border)
   const handleGridLayerChange = useCallback((data: {
     background: string; backgroundOpacity: number; borderRadius: string;
     layerBorderWidth: number; layerBorderColor: string; layerBorderOpacity: number;
