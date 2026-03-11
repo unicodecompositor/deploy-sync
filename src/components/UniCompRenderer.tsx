@@ -273,7 +273,25 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
         }
       });
     } else if (paramType === 'd') {
-      // For scale undo: get current bounds, undo, restore dimensions
+      // For scale undo: restore dimensions + contract grid via se= (scale expand)
+      let expandLeft = 0, expandTop = 0;
+      
+      // Find se= from the step being undone
+      selectionSet.forEach(idx => {
+        const sym = newSpec.symbols[idx];
+        if (!sym?.history) return;
+        for (let i = sym.history.length - 1; i >= 0; i--) {
+          if (sym.history[i].d) {
+            const se = sym.history[i].se;
+            if (se) {
+              expandLeft = Math.max(expandLeft, se.sl || 0);
+              expandTop = Math.max(expandTop, se.st || 0);
+            }
+            break;
+          }
+        }
+      });
+      
       selectionSet.forEach(idx => {
         const sym = newSpec.symbols[idx];
         if (!sym) return;
@@ -286,6 +304,28 @@ export const UniCompRenderer: React.FC<UniCompRendererProps> = ({
           sym.end = newEnd;
         }
       });
+      
+      // Contract grid if it was expanded during scaling
+      if (changed && (expandLeft > 0 || expandTop > 0)) {
+        const oldW = newSpec.gridWidth;
+        const newW = Math.max(2, oldW - expandLeft);
+        const newH = Math.max(2, newSpec.gridHeight - expandTop);
+        
+        newSpec.symbols = newSpec.symbols.map(s => {
+          const r = getRect(s.start, s.end, oldW);
+          const shiftedX = Math.max(0, r.x1 - expandLeft);
+          const shiftedY = Math.max(0, r.y1 - expandTop);
+          const w = Math.min(r.width, newW - shiftedX);
+          const h = Math.min(r.height, newH - shiftedY);
+          return {
+            ...s,
+            start: shiftedY * newW + shiftedX,
+            end: (shiftedY + Math.max(1, h) - 1) * newW + (shiftedX + Math.max(1, w) - 1)
+          };
+        });
+        newSpec.gridWidth = newW;
+        newSpec.gridHeight = newH;
+      }
     } else {
       // History-based undo for st/sp/rotate/scale
       selectionSet.forEach(idx => {
