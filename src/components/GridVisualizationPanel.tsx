@@ -455,9 +455,8 @@ export const GridVisualizationPanel: React.FC<GridVisualizationPanelProps> = ({
             strokeWidth={spec?.strokeWidth ?? 0}
             strokeColor={spec?.strokeColor || 'hsl(0, 0%, 100%)'}
             strokeOpacity={spec?.strokeOpacity ?? 1}
-            onColorChange={handleGridColorChange}
-            onBackgroundChange={handleGridBgChange}
-            onStrokeChange={handleGridStrokeChange}
+            onSymbolChange={handleGridSymbolChange}
+            onLayerChange={handleGridLayerChange}
             style={{ width: '100%' }}
           />
           {gridColorHistory.length > 0 && (
